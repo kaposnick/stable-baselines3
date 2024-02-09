@@ -226,9 +226,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     rewards[idx] += self.gamma * terminal_value
 
             if (self.masked_logits):
-                self._last_masks = infos[0]['mask']
+                new_mask = infos[0]['mask']
             else:
-                self._last_masks = [0 for _ in infos]
+                new_mask = [0 for _ in infos]
             rollout_buffer.add(
                 self._last_obs,  # type: ignore[arg-type]
                 actions,
@@ -240,6 +240,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             )
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
+            self._last_masks = new_mask
 
         with th.no_grad():
             # Compute value for the last timestep
