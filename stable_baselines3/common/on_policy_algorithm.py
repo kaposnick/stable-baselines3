@@ -70,6 +70,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         max_grad_norm: float,
         use_sde: bool,
         sde_sample_freq: int,
+        masked_logits: bool = False,
         rollout_buffer_class: Optional[Type[RolloutBuffer]] = None,
         rollout_buffer_kwargs: Optional[Dict[str, Any]] = None,
         stats_window_size: int = 100,
@@ -86,6 +87,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             policy=policy,
             env=env,
             learning_rate=learning_rate,
+            masked_logits=masked_logits,
             policy_kwargs=policy_kwargs,
             verbose=verbose,
             device=device,
@@ -131,7 +133,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             **self.rollout_buffer_kwargs,
         )
         self.policy = self.policy_class(  # type: ignore[assignment]
-            self.observation_space, self.action_space, self.lr_schedule, use_sde=self.use_sde, **self.policy_kwargs
+            self.observation_space, self.action_space, self.lr_schedule, masked_logits=self.masked_logits, use_sde=self.use_sde, **self.policy_kwargs
         )
         self.policy = self.policy.to(self.device)
 
@@ -175,7 +177,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             with th.no_grad():
                 # Convert to pytorch tensor or to TensorDict
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
-                actions, values, log_probs = self.policy(obs_tensor)
+                if (self.masked_logits):
+                    actions, values, log_probs = self.policy(obs_tensor, mask=self._last_masks)
+                else:
+                    actions, values, log_probs = self.policy(obs_tensor)
             actions = actions.cpu().numpy()
 
             # Rescale and perform action
@@ -220,6 +225,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                         terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
                     rewards[idx] += self.gamma * terminal_value
 
+            if (self.masked_logits):
+                self._last_masks = infos[0]['mask']
+            else:
+                self._last_masks = [0 for _ in infos]
             rollout_buffer.add(
                 self._last_obs,  # type: ignore[arg-type]
                 actions,
@@ -227,6 +236,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                 self._last_episode_starts,  # type: ignore[arg-type]
                 values,
                 log_probs,
+                np.array(self._last_masks)
             )
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones

@@ -68,6 +68,7 @@ class A2C(OnPolicyAlgorithm):
         policy: Union[str, Type[ActorCriticPolicy]],
         env: Union[GymEnv, str],
         learning_rate: Union[float, Schedule] = 7e-4,
+        masked_logits: bool = False,
         n_steps: int = 5,
         gamma: float = 0.99,
         gae_lambda: float = 1.0,
@@ -101,6 +102,7 @@ class A2C(OnPolicyAlgorithm):
             max_grad_norm=max_grad_norm,
             use_sde=use_sde,
             sde_sample_freq=sde_sample_freq,
+            masked_logits=masked_logits,
             rollout_buffer_class=rollout_buffer_class,
             rollout_buffer_kwargs=rollout_buffer_kwargs,
             stats_window_size=stats_window_size,
@@ -147,7 +149,10 @@ class A2C(OnPolicyAlgorithm):
                 # Convert discrete action from float to long
                 actions = actions.long().flatten()
 
-            values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+            if (self.masked_logits):
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions, rollout_data.masks)
+            else:
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
             values = values.flatten()
 
             # Normalize advantage (not present in the original implementation)

@@ -8,6 +8,7 @@ import torch as th
 from gymnasium import spaces
 from torch import nn
 from torch.distributions import Bernoulli, Categorical, Normal
+from torchrl.modules     import MaskedCategorical
 
 from stable_baselines3.common.preprocessing import get_action_dim
 
@@ -17,6 +18,7 @@ SelfSquashedDiagGaussianDistribution = TypeVar(
     "SelfSquashedDiagGaussianDistribution", bound="SquashedDiagGaussianDistribution"
 )
 SelfCategoricalDistribution = TypeVar("SelfCategoricalDistribution", bound="CategoricalDistribution")
+SelfMaskedCategoricalDistribution = TypeVar("SelfMaskedCategoricalDistribution", bound="MaskedCategoricalDistribution")
 SelfMultiCategoricalDistribution = TypeVar("SelfMultiCategoricalDistribution", bound="MultiCategoricalDistribution")
 SelfBernoulliDistribution = TypeVar("SelfBernoulliDistribution", bound="BernoulliDistribution")
 SelfStateDependentNoiseDistribution = TypeVar("SelfStateDependentNoiseDistribution", bound="StateDependentNoiseDistribution")
@@ -309,6 +311,30 @@ class CategoricalDistribution(Distribution):
         actions = self.actions_from_params(action_logits)
         log_prob = self.log_prob(actions)
         return actions, log_prob
+    
+class MaskedCategoricalDistribution(CategoricalDistribution):
+    """
+    Masked Categorical distribution for discrete actions.
+
+    :param action_dim: Number of discrete actions
+    """
+
+    def __init__(self, action_dim: int):
+        super(MaskedCategoricalDistribution, self).__init__(action_dim)
+
+    def proba_distribution(self: SelfCategoricalDistribution, action_logits: th.Tensor, mask: Optional[th.Tensor] = None) -> SelfCategoricalDistribution:
+        self.distribution = MaskedCategorical(logits=action_logits, mask=mask)
+        return self
+
+    def actions_from_params(self, action_logits: th.Tensor, deterministic: bool = False, mask: Optional[th.Tensor] = None) -> th.Tensor:
+        # Update the proba distribution
+        self.proba_distribution(action_logits, mask)
+        return self.get_actions(deterministic=deterministic)
+
+    def log_prob_from_params(self, action_logits: th.Tensor, mask: Optional[th.Tensor] = None) -> Tuple[th.Tensor, th.Tensor]:
+        actions = self.actions_from_params(action_logits, mask)
+        log_prob = self.log_prob(actions)
+        return actions, log_prob    
 
 
 class MultiCategoricalDistribution(Distribution):
@@ -661,7 +687,7 @@ class TanhBijector:
 
 
 def make_proba_distribution(
-    action_space: spaces.Space, use_sde: bool = False, dist_kwargs: Optional[Dict[str, Any]] = None
+    action_space: spaces.Space, use_sde: bool = False, masked_logits: bool = False, dist_kwargs: Optional[Dict[str, Any]] = None
 ) -> Distribution:
     """
     Return an instance of Distribution for the correct type of action space
@@ -679,6 +705,7 @@ def make_proba_distribution(
         cls = StateDependentNoiseDistribution if use_sde else DiagGaussianDistribution
         return cls(get_action_dim(action_space), **dist_kwargs)
     elif isinstance(action_space, spaces.Discrete):
+        if (masked_logits): return MaskedCategoricalDistribution(int(action_space.n), **dist_kwargs)
         return CategoricalDistribution(int(action_space.n), **dist_kwargs)
     elif isinstance(action_space, spaces.MultiDiscrete):
         return MultiCategoricalDistribution(list(action_space.nvec), **dist_kwargs)

@@ -370,7 +370,8 @@ class RolloutBuffer(BaseBuffer):
     episode_starts: np.ndarray
     log_probs: np.ndarray
     values: np.ndarray
-
+    masks: np.ndarray
+ 
     def __init__(
         self,
         buffer_size: int,
@@ -396,6 +397,7 @@ class RolloutBuffer(BaseBuffer):
         self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.masks = np.zeros((self.buffer_size, self.n_envs, self.action_space.n), dtype=np.bool8)
         self.generator_ready = False
         super().reset()
 
@@ -444,6 +446,7 @@ class RolloutBuffer(BaseBuffer):
         episode_start: np.ndarray,
         value: th.Tensor,
         log_prob: th.Tensor,
+        mask: np.ndarray
     ) -> None:
         """
         :param obs: Observation
@@ -473,6 +476,7 @@ class RolloutBuffer(BaseBuffer):
         self.episode_starts[self.pos] = np.array(episode_start)
         self.values[self.pos] = value.clone().cpu().numpy().flatten()
         self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+        self.masks[self.pos] = np.array(mask)
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
@@ -489,6 +493,7 @@ class RolloutBuffer(BaseBuffer):
                 "log_probs",
                 "advantages",
                 "returns",
+                "masks"
             ]
 
             for tensor in _tensor_names:
@@ -516,6 +521,7 @@ class RolloutBuffer(BaseBuffer):
             self.log_probs[batch_inds].flatten(),
             self.advantages[batch_inds].flatten(),
             self.returns[batch_inds].flatten(),
+            self.masks[batch_inds]
         )
         return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
 
@@ -524,7 +530,6 @@ class DictReplayBuffer(ReplayBuffer):
     """
     Dict Replay buffer used in off-policy algorithms like SAC/TD3.
     Extends the ReplayBuffer to use dictionary observations
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -752,6 +757,7 @@ class DictRolloutBuffer(RolloutBuffer):
         self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.masks = np.zeros((self.buffer_size, self.n_envs, self.action_space.n), dtype=np.bool8)
         self.generator_ready = False
         super(RolloutBuffer, self).reset()
 
@@ -763,6 +769,7 @@ class DictRolloutBuffer(RolloutBuffer):
         episode_start: np.ndarray,
         value: th.Tensor,
         log_prob: th.Tensor,
+        mask: np.ndarray
     ) -> None:
         """
         :param obs: Observation
@@ -794,6 +801,7 @@ class DictRolloutBuffer(RolloutBuffer):
         self.episode_starts[self.pos] = np.array(episode_start)
         self.values[self.pos] = value.clone().cpu().numpy().flatten()
         self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+        self.masks[self.pos] = np.array(mask)
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
@@ -809,7 +817,7 @@ class DictRolloutBuffer(RolloutBuffer):
             for key, obs in self.observations.items():
                 self.observations[key] = self.swap_and_flatten(obs)
 
-            _tensor_names = ["actions", "values", "log_probs", "advantages", "returns"]
+            _tensor_names = ["actions", "values", "log_probs", "advantages", "returns", "masks"]
 
             for tensor in _tensor_names:
                 self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
@@ -836,4 +844,5 @@ class DictRolloutBuffer(RolloutBuffer):
             old_log_prob=self.to_torch(self.log_probs[batch_inds].flatten()),
             advantages=self.to_torch(self.advantages[batch_inds].flatten()),
             returns=self.to_torch(self.returns[batch_inds].flatten()),
+            masks=self.to_torch(self.masks[batch_inds])
         )

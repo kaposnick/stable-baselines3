@@ -109,6 +109,7 @@ setup(
         "pandas",
         # Plotting learning curves
         "matplotlib",
+        "torchrl>=0.3.0"
     ],
     extras_require={
         "tests": [

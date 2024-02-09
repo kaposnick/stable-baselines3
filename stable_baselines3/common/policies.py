@@ -15,6 +15,7 @@ from torch import nn
 from stable_baselines3.common.distributions import (
     BernoulliDistribution,
     CategoricalDistribution,
+    MaskedCategoricalDistribution,
     DiagGaussianDistribution,
     Distribution,
     MultiCategoricalDistribution,
@@ -332,6 +333,7 @@ class BasePolicy(BaseModel, ABC):
         state: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
+        mask: Optional[th.Tensor] = None
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
         """
         Get the policy action from an observation (and optional hidden state).
@@ -363,7 +365,7 @@ class BasePolicy(BaseModel, ABC):
         obs_tensor, vectorized_env = self.obs_to_tensor(observation)
 
         with th.no_grad():
-            actions = self._predict(obs_tensor, deterministic=deterministic)
+            actions = self._predict(obs_tensor, deterministic=deterministic, mask=mask)
         # Convert to numpy, and reshape to the original action shape
         actions = actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc]
 
@@ -451,6 +453,7 @@ class ActorCriticPolicy(BasePolicy):
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.Tanh,
         ortho_init: bool = True,
+        masked_logits: bool = False,
         use_sde: bool = False,
         log_std_init: float = 0.0,
         full_std: bool = True,
@@ -525,10 +528,11 @@ class ActorCriticPolicy(BasePolicy):
             }
 
         self.use_sde = use_sde
+        self.masked_logits = masked_logits
         self.dist_kwargs = dist_kwargs
 
         # Action distribution
-        self.action_dist = make_proba_distribution(action_space, use_sde=use_sde, dist_kwargs=dist_kwargs)
+        self.action_dist = make_proba_distribution(action_space, use_sde=use_sde, masked_logits=masked_logits, dist_kwargs=dist_kwargs)
 
         self._build(lr_schedule)
 
@@ -599,7 +603,7 @@ class ActorCriticPolicy(BasePolicy):
             self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=latent_dim_pi, latent_sde_dim=latent_dim_pi, log_std_init=self.log_std_init
             )
-        elif isinstance(self.action_dist, (CategoricalDistribution, MultiCategoricalDistribution, BernoulliDistribution)):
+        elif isinstance(self.action_dist, (CategoricalDistribution, MaskedCategoricalDistribution, MultiCategoricalDistribution, BernoulliDistribution)):
             self.action_net = self.action_dist.proba_distribution_net(latent_dim=latent_dim_pi)
         else:
             raise NotImplementedError(f"Unsupported distribution '{self.action_dist}'.")
@@ -631,7 +635,7 @@ class ActorCriticPolicy(BasePolicy):
         # Setup optimizer with initial learning rate
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)  # type: ignore[call-arg]
 
-    def forward(self, obs: th.Tensor, deterministic: bool = False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+    def forward(self, obs: th.Tensor, deterministic: bool = False, mask: Optional[th.Tensor] = None) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Forward pass in all the networks (actor and critic)
 
@@ -649,7 +653,7 @@ class ActorCriticPolicy(BasePolicy):
             latent_vf = self.mlp_extractor.forward_critic(vf_features)
         # Evaluate the values for the given observations
         values = self.value_net(latent_vf)
-        distribution = self._get_action_dist_from_latent(latent_pi)
+        distribution = self._get_action_dist_from_latent(latent_pi, mask)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
         actions = actions.reshape((-1, *self.action_space.shape))  # type: ignore[misc]
@@ -679,7 +683,7 @@ class ActorCriticPolicy(BasePolicy):
             vf_features = super().extract_features(obs, self.vf_features_extractor)
             return pi_features, vf_features
 
-    def _get_action_dist_from_latent(self, latent_pi: th.Tensor) -> Distribution:
+    def _get_action_dist_from_latent(self, latent_pi: th.Tensor, mask: Optional[th.Tensor] = None) -> Distribution:
         """
         Retrieve action distribution given the latent codes.
 
@@ -692,7 +696,10 @@ class ActorCriticPolicy(BasePolicy):
             return self.action_dist.proba_distribution(mean_actions, self.log_std)
         elif isinstance(self.action_dist, CategoricalDistribution):
             # Here mean_actions are the logits before the softmax
-            return self.action_dist.proba_distribution(action_logits=mean_actions)
+            if (self.masked_logits):
+                return self.action_dist.proba_distribution(action_logits=mean_actions, mask=mask)
+            else:
+                return self.action_dist.proba_distribution(action_logits=mean_actions)            
         elif isinstance(self.action_dist, MultiCategoricalDistribution):
             # Here mean_actions are the flattened logits
             return self.action_dist.proba_distribution(action_logits=mean_actions)
@@ -704,7 +711,7 @@ class ActorCriticPolicy(BasePolicy):
         else:
             raise ValueError("Invalid action distribution")
 
-    def _predict(self, observation: PyTorchObs, deterministic: bool = False) -> th.Tensor:
+    def _predict(self, observation: PyTorchObs, deterministic: bool = False, mask: Optional[th.Tensor] = None) -> th.Tensor:
         """
         Get the action according to the policy for a given observation.
 
@@ -712,9 +719,9 @@ class ActorCriticPolicy(BasePolicy):
         :param deterministic: Whether to use stochastic or deterministic actions
         :return: Taken action according to the policy
         """
-        return self.get_distribution(observation).get_actions(deterministic=deterministic)
+        return self.get_distribution(observation, mask).get_actions(deterministic=deterministic)
 
-    def evaluate_actions(self, obs: PyTorchObs, actions: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
+    def evaluate_actions(self, obs: PyTorchObs, actions: th.Tensor, mask: Optional[th.Tensor] = None) -> Tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
         """
         Evaluate actions according to the current policy,
         given the observations.
@@ -732,13 +739,13 @@ class ActorCriticPolicy(BasePolicy):
             pi_features, vf_features = features
             latent_pi = self.mlp_extractor.forward_actor(pi_features)
             latent_vf = self.mlp_extractor.forward_critic(vf_features)
-        distribution = self._get_action_dist_from_latent(latent_pi)
+        distribution = self._get_action_dist_from_latent(latent_pi, mask)
         log_prob = distribution.log_prob(actions)
         values = self.value_net(latent_vf)
         entropy = distribution.entropy()
         return values, log_prob, entropy
 
-    def get_distribution(self, obs: PyTorchObs) -> Distribution:
+    def get_distribution(self, obs: PyTorchObs, mask: Optional[th.Tensor] = None) -> Distribution:
         """
         Get the current policy distribution given the observations.
 
@@ -747,7 +754,7 @@ class ActorCriticPolicy(BasePolicy):
         """
         features = super().extract_features(obs, self.pi_features_extractor)
         latent_pi = self.mlp_extractor.forward_actor(features)
-        return self._get_action_dist_from_latent(latent_pi)
+        return self._get_action_dist_from_latent(latent_pi, mask)
 
     def predict_values(self, obs: PyTorchObs) -> th.Tensor:
         """
@@ -874,6 +881,7 @@ class MultiInputActorCriticPolicy(ActorCriticPolicy):
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.Tanh,
         ortho_init: bool = True,
+        masked_logits: bool = False,
         use_sde: bool = False,
         log_std_init: float = 0.0,
         full_std: bool = True,
@@ -893,6 +901,7 @@ class MultiInputActorCriticPolicy(ActorCriticPolicy):
             net_arch,
             activation_fn,
             ortho_init,
+            masked_logits,
             use_sde,
             log_std_init,
             full_std,

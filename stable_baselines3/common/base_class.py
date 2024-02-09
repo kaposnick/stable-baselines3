@@ -107,6 +107,7 @@ class BaseAlgorithm(ABC):
         policy: Union[str, Type[BasePolicy]],
         env: Union[GymEnv, str, None],
         learning_rate: Union[float, Schedule],
+        masked_logits: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
         stats_window_size: int = 100,
         tensorboard_log: Optional[str] = None,
@@ -140,8 +141,10 @@ class BaseAlgorithm(ABC):
         self.action_noise: Optional[ActionNoise] = None
         self.start_time = 0.0
         self.learning_rate = learning_rate
+        self.masked_logits = masked_logits
         self.tensorboard_log = tensorboard_log
         self._last_obs = None  # type: Optional[Union[np.ndarray, Dict[str, np.ndarray]]]
+        self._last_masks = None # type: Optional[th.Tensor]
         self._last_episode_starts = None  # type: Optional[np.ndarray]
         # When using VecNormalize:
         self._last_original_obs = None  # type: Optional[Union[np.ndarray, Dict[str, np.ndarray]]]
@@ -421,6 +424,8 @@ class BaseAlgorithm(ABC):
         if reset_num_timesteps or self._last_obs is None:
             assert self.env is not None
             self._last_obs = self.env.reset()  # type: ignore[assignment]
+            if (self.masked_logits):
+                self._last_masks = self.env.reset_infos[0]
             self._last_episode_starts = np.ones((self.env.num_envs,), dtype=bool)
             # Retrieve unnormalized observation for saving into the buffer
             if self._vec_normalize_env is not None:
@@ -536,6 +541,7 @@ class BaseAlgorithm(ABC):
         state: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
+        mask: Optional[th.Tensor] = None
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
         """
         Get the policy action from an observation (and optional hidden state).
@@ -550,7 +556,7 @@ class BaseAlgorithm(ABC):
         :return: the model's action and the next hidden state
             (used in recurrent policies)
         """
-        return self.policy.predict(observation, state, episode_start, deterministic)
+        return self.policy.predict(observation, state, episode_start, deterministic, mask)
 
     def set_random_seed(self, seed: Optional[int] = None) -> None:
         """
