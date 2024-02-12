@@ -226,7 +226,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                     rewards[idx] += self.gamma * terminal_value
 
             if (self.masked_logits):
-                new_mask = infos[0]['mask']
+                if dones[0]:
+                    new_mask = env.reset_infos[0]
+                else:
+                    new_mask = infos[0]['mask']
             else:
                 new_mask = [0 for _ in infos]
             rollout_buffer.add(
