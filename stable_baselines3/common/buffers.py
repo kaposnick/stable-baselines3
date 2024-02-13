@@ -15,6 +15,7 @@ from stable_baselines3.common.type_aliases import (
 )
 from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
+import torch_geometric
 
 try:
     # Check memory used by replay buffer when possible
@@ -50,7 +51,9 @@ class BaseBuffer(ABC):
         self.buffer_size = buffer_size
         self.observation_space = observation_space
         self.action_space = action_space
-        self.obs_shape = get_obs_shape(observation_space)  # type: ignore[assignment]
+
+        if (not isinstance(observation_space, spaces.Graph)):
+            self.obs_shape = get_obs_shape(observation_space)  # type: ignore[assignment]
 
         self.action_dim = get_action_dim(action_space)
         self.pos = 0
@@ -386,10 +389,18 @@ class RolloutBuffer(BaseBuffer):
         self.gae_lambda = gae_lambda
         self.gamma = gamma
         self.generator_ready = False
+        self.observation_space = observation_space
         self.reset()
 
     def reset(self) -> None:
-        self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        if (not isinstance(self.observation_space, spaces.Graph)):
+            self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        else:
+            self.observations = []
+            for _ in range(self.buffer_size):
+                buffer_record = [None for _ in range(self.n_envs)]
+                self.observations.append(buffer_record)
+
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
@@ -440,7 +451,7 @@ class RolloutBuffer(BaseBuffer):
 
     def add(
         self,
-        obs: np.ndarray,
+        obs: Union[np.ndarray,torch_geometric.data.Data],
         action: np.ndarray,
         reward: np.ndarray,
         episode_start: np.ndarray,
@@ -470,7 +481,11 @@ class RolloutBuffer(BaseBuffer):
         # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
         action = action.reshape((self.n_envs, self.action_dim))
 
-        self.observations[self.pos] = np.array(obs)
+        if (not isinstance(self.observation_space, spaces.Graph)):
+            self.observations[self.pos] = np.array(obs)
+        else:
+            for i in range(self.n_envs):
+                self.observations[self.pos][i] = obs[i]
         self.actions[self.pos] = np.array(action)
         self.rewards[self.pos] = np.array(reward)
         self.episode_starts[self.pos] = np.array(episode_start)
