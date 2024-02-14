@@ -127,7 +127,7 @@ class BaseBuffer(ABC):
         """
         raise NotImplementedError()
 
-    def to_torch(self, array: np.ndarray, copy: bool = True) -> th.Tensor:
+    def to_torch(self, array: Union[np.ndarray, List], copy: bool = True) -> th.Tensor:
         """
         Convert a numpy array to a PyTorch tensor.
         Note: it copies the data by default
@@ -137,6 +137,9 @@ class BaseBuffer(ABC):
             by reference). This argument is inoperative if the device is not the CPU.
         :return:
         """
+        if isinstance(array, List):
+            return array
+
         if copy:
             return th.tensor(array, device=self.device)
         return th.as_tensor(array, device=self.device)
@@ -512,7 +515,10 @@ class RolloutBuffer(BaseBuffer):
             ]
 
             for tensor in _tensor_names:
-                self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+                if tensor == 'observations' and isinstance(self.observation_space, spaces.Graph):
+                    self.__dict__[tensor] = [x for xs in self.__dict__[tensor] for x in xs]
+                else:
+                    self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
             self.generator_ready = True
 
         # Return everything, don't create minibatches
@@ -530,7 +536,7 @@ class RolloutBuffer(BaseBuffer):
         env: Optional[VecNormalize] = None,
     ) -> RolloutBufferSamples:
         data = (
-            self.observations[batch_inds],
+            self.observations[batch_inds] if not isinstance(self.observation_space, spaces.Graph) else [self.observations[i] for i in batch_inds],
             self.actions[batch_inds],
             self.values[batch_inds].flatten(),
             self.log_probs[batch_inds].flatten(),

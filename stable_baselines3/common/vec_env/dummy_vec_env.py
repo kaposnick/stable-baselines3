@@ -8,7 +8,7 @@ import numpy as np
 
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv, VecEnvIndices, VecEnvObs, VecEnvStepReturn
 from stable_baselines3.common.vec_env.patch_gym import _patch_env
-from stable_baselines3.common.vec_env.util import copy_obs_dict, dict_to_obs, obs_space_info
+from stable_baselines3.common.vec_env.util import copy_obs_dict, copy_obs_dict_graph, dict_to_obs, obs_space_info
 
 
 class DummyVecEnv(VecEnv):
@@ -113,7 +113,10 @@ class DummyVecEnv(VecEnv):
                 self.buf_obs[key][env_idx] = obs[key]  # type: ignore[call-overload]
 
     def _obs_from_buf(self) -> VecEnvObs:
-        return dict_to_obs(self.observation_space, copy_obs_dict(self.buf_obs))
+        if (isinstance(self.observation_space, gym.spaces.Graph)):
+            return dict_to_obs(self.observation_space, copy_obs_dict_graph(self.buf_obs))
+        else:
+            return dict_to_obs(self.observation_space, copy_obs_dict(self.buf_obs))
 
     def get_attr(self, attr_name: str, indices: VecEnvIndices = None) -> List[Any]:
         """Return attribute from vectorized environment (see base class)."""

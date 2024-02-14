@@ -12,6 +12,7 @@ import gymnasium as gym
 import numpy as np
 import torch as th
 from gymnasium import spaces
+import torch_geometric
 
 import stable_baselines3 as sb3
 
@@ -471,7 +472,7 @@ def polyak_update(
             th.add(target_param.data, param.data, alpha=tau, out=target_param.data)
 
 
-def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray]], device: th.device) -> Union[th.Tensor, TensorDict]:
+def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray], List[torch_geometric.data.Data]], device: th.device) -> Union[th.Tensor, TensorDict, List[torch_geometric.data.Data]]:
     """
     Moves the observation to the given device.
 
@@ -483,6 +484,8 @@ def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray]], device: th.devi
         return th.as_tensor(obs, device=device)
     elif isinstance(obs, dict):
         return {key: th.as_tensor(_obs, device=device) for (key, _obs) in obs.items()}
+    elif (isinstance(obs, List)):
+        return obs
     else:
         raise Exception(f"Unrecognized type of observation {type(obs)}")
 

@@ -5,6 +5,9 @@ import numpy as np
 import torch as th
 from gymnasium import spaces
 from torch.nn import functional as F
+from torch import stack
+from typing import List
+from torch_geometric.data import Data, Batch
 
 
 def is_image_space_channels_first(observation_space: spaces.Box) -> bool:
@@ -93,7 +96,7 @@ def preprocess_obs(
     obs: Union[th.Tensor, Dict[str, th.Tensor]],
     observation_space: spaces.Space,
     normalize_images: bool = True,
-) -> Union[th.Tensor, Dict[str, th.Tensor]]:
+) -> Union[th.Tensor, Dict[str, th.Tensor], Batch]:
     """
     Preprocess observation to be to a neural network.
     For images, it normalizes the values by dividing them by 255 (to have values in [0, 1])
@@ -113,7 +116,7 @@ def preprocess_obs(
             preprocessed_obs[key] = preprocess_obs(_obs, observation_space[key], normalize_images=normalize_images)
         return preprocessed_obs  # type: ignore[return-value]
 
-    assert isinstance(obs, th.Tensor), f"Expecting a torch Tensor, but got {type(obs)}"
+    assert isinstance(obs, (th.Tensor, List)), f"Expecting a torch Tensor, but got {type(obs)}"
 
     if isinstance(observation_space, spaces.Box):
         if normalize_images and is_image_space(observation_space):
@@ -123,6 +126,9 @@ def preprocess_obs(
     elif isinstance(observation_space, spaces.Discrete):
         # One hot encoding and convert to float to avoid errors
         return F.one_hot(obs.long(), num_classes=int(observation_space.n)).float()
+    
+    elif isinstance(observation_space, spaces.Graph):
+        return Batch.from_data_list(obs)
 
     elif isinstance(observation_space, spaces.MultiDiscrete):
         # Tensor concatenation of one hot encodings of each Categorical sub-space

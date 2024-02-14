@@ -2,13 +2,14 @@
 Helpers for dealing with vectorized environments.
 """
 from collections import OrderedDict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 from gymnasium import spaces
 
 from stable_baselines3.common.preprocessing import check_for_nested_spaces
 from stable_baselines3.common.vec_env.base_vec_env import VecEnvObs
+from torch_geometric.data import Data
 
 
 def copy_obs_dict(obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
@@ -21,8 +22,11 @@ def copy_obs_dict(obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     assert isinstance(obs, OrderedDict), f"unexpected type for observations '{type(obs)}'"
     return OrderedDict([(k, np.copy(v)) for k, v in obs.items()])
 
+def copy_obs_dict_graph(obs: Dict[str, List[Data]]) -> Dict[str, List[Data]]:
+    assert isinstance(obs, OrderedDict), f"unexpected type for observations '{type(obs)}'"
+    return OrderedDict([(k, [item.clone('x', 'edge_index') for item in v]) for k, v in obs.items()])
 
-def dict_to_obs(obs_space: spaces.Space, obs_dict: Dict[Any, np.ndarray]) -> VecEnvObs:
+def dict_to_obs(obs_space: spaces.Space, obs_dict: Dict[Any, Union[np.ndarray, List[Data]]]) -> VecEnvObs:
     """
     Convert an internal representation raw_obs into the appropriate type
     specified by space.
