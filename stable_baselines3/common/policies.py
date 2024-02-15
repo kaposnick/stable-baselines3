@@ -120,7 +120,7 @@ class BaseModel(nn.Module):
         """Helper method to create a features extractor."""
         return self.features_extractor_class(self.observation_space, **self.features_extractor_kwargs)
 
-    def extract_features(self, obs: PyTorchObs, features_extractor: BaseFeaturesExtractor) -> th.Tensor:
+    def extract_features(self, obs: PyTorchObs, features_extractor: BaseFeaturesExtractor, mask: Optional[th.tensor] = None) -> th.Tensor:
         """
         Preprocess the observation if needed and extract features.
 
@@ -129,7 +129,7 @@ class BaseModel(nn.Module):
         :return: The extracted features
         """
         preprocessed_obs = preprocess_obs(obs, self.observation_space, normalize_images=self.normalize_images)
-        return features_extractor(preprocessed_obs)
+        return features_extractor(preprocessed_obs, mask=mask)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         """
@@ -644,7 +644,7 @@ class ActorCriticPolicy(BasePolicy):
         :return: action, value and log probability of the action
         """
         # Preprocess the observation if needed
-        features = self.extract_features(obs)
+        features = self.extract_features(obs, mask=mask)
         if self.share_features_extractor:
             latent_pi, latent_vf = self.mlp_extractor(features)
         else:
@@ -660,7 +660,7 @@ class ActorCriticPolicy(BasePolicy):
         return actions, values, log_prob
 
     def extract_features(  # type: ignore[override]
-        self, obs: PyTorchObs, features_extractor: Optional[BaseFeaturesExtractor] = None
+        self, obs: PyTorchObs, features_extractor: Optional[BaseFeaturesExtractor] = None, mask: Optional[th.Tensor] = None
     ) -> Union[th.Tensor, Tuple[th.Tensor, th.Tensor]]:
         """
         Preprocess the observation if needed and extract features.
@@ -671,7 +671,7 @@ class ActorCriticPolicy(BasePolicy):
             features for the actor and the features for the critic.
         """
         if self.share_features_extractor:
-            return super().extract_features(obs, self.features_extractor if features_extractor is None else features_extractor)
+            return super().extract_features(obs, self.features_extractor if features_extractor is None else features_extractor, mask=mask)
         else:
             if features_extractor is not None:
                 warnings.warn(
@@ -732,7 +732,7 @@ class ActorCriticPolicy(BasePolicy):
             and entropy of the action distribution.
         """
         # Preprocess the observation if needed
-        features = self.extract_features(obs)
+        features = self.extract_features(obs,mask=mask)
         if self.share_features_extractor:
             latent_pi, latent_vf = self.mlp_extractor(features)
         else:
@@ -752,18 +752,18 @@ class ActorCriticPolicy(BasePolicy):
         :param obs:
         :return: the action distribution.
         """
-        features = super().extract_features(obs, self.pi_features_extractor)
+        features = super().extract_features(obs, self.pi_features_extractor, mask=mask)
         latent_pi = self.mlp_extractor.forward_actor(features)
         return self._get_action_dist_from_latent(latent_pi, mask)
 
-    def predict_values(self, obs: PyTorchObs) -> th.Tensor:
+    def predict_values(self, obs: PyTorchObs, mask: Optional[th.Tensor] = None) -> th.Tensor:
         """
         Get the estimated values according to the current policy given the observations.
 
         :param obs: Observation
         :return: the estimated values.
         """
-        features = super().extract_features(obs, self.vf_features_extractor)
+        features = super().extract_features(obs, self.vf_features_extractor, mask=mask)
         latent_vf = self.mlp_extractor.forward_critic(features)
         return self.value_net(latent_vf)
 

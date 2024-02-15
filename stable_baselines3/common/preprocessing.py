@@ -6,7 +6,7 @@ import torch as th
 from gymnasium import spaces
 from torch.nn import functional as F
 from torch import stack
-from typing import List
+from typing import List, Optional
 from torch_geometric.data import Data, Batch
 
 
@@ -116,7 +116,7 @@ def preprocess_obs(
             preprocessed_obs[key] = preprocess_obs(_obs, observation_space[key], normalize_images=normalize_images)
         return preprocessed_obs  # type: ignore[return-value]
 
-    assert isinstance(obs, (th.Tensor, List)), f"Expecting a torch Tensor, but got {type(obs)}"
+    assert isinstance(obs, (th.Tensor, List)), f"Expecting a torch [Tensor, List], but got {type(obs)}"
 
     if isinstance(observation_space, spaces.Box):
         if normalize_images and is_image_space(observation_space):
